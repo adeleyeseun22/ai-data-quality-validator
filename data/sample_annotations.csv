@@ -1,0 +1,11 @@
+task_id,annotator_id,text,label,confidence,review_status
+T001,A001,"This product is excellent",positive,0.95,approved
+T002,A002,"Bad service",negative,0.89,approved
+T003,A003,,positive,0.60,pending
+T003,A004,"Very helpful",positive,0.75,approved
+T004,A002,"I do not know",unknown,0.40,rejected
+T005,A001,"Average experience",neutral,0.70,approved
+T006,A005,"",negative,0.55,pending
+T007,A006,"Loved the response",positive,0.98,approved
+T008,A007,"Terrible support",negative,0.92,approved
+T009,A008,"Not sure",unclear,0.45,rejected

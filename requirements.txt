@@ -1,0 +1,7 @@
+pandas
+typer
+rich
+pytest
+ruff
+mypy
+pydantic
