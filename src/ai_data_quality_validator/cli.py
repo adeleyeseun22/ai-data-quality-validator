@@ -4,8 +4,17 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from ai_data_quality_validator.report import format_text_report, save_text_report
-from ai_data_quality_validator.validator import validate_file
+from ai_data_quality_validator.report import (
+    format_text_report,
+    save_bad_rows,
+    save_json_report,
+    save_text_report,
+)
+from ai_data_quality_validator.validator import (
+    generate_quality_report,
+    identify_issue_rows,
+    load_dataset,
+)
 
 app = typer.Typer(
     help="Validate AI annotation datasets and generate quality reports.",
@@ -32,14 +41,29 @@ def validate(
         Path("reports/quality_report.txt"),
         "--output",
         "-o",
-        help="Path where the report should be saved.",
+        help="Path where the text report should be saved.",
+    ),
+    json_file: Path = typer.Option(
+        Path("reports/quality_report.json"),
+        "--json",
+        "-j",
+        help="Path where the JSON report should be saved.",
+    ),
+    bad_rows_file: Path = typer.Option(
+        Path("reports/bad_rows.csv"),
+        "--bad-rows",
+        "-b",
+        help="Path where bad rows should be exported.",
     ),
 ) -> None:
     """
-    Validate an annotation dataset and generate a quality report.
+    Validate an annotation dataset and generate text, JSON, and bad-row reports.
     """
     try:
-        report = validate_file(input_file)
+        df = load_dataset(input_file)
+        report = generate_quality_report(df)
+        issue_rows = identify_issue_rows(df)
+
         text_report = format_text_report(report)
 
         console.print(
@@ -51,8 +75,12 @@ def validate(
         )
 
         save_text_report(report, output_file)
+        save_json_report(report, json_file)
+        save_bad_rows(issue_rows, bad_rows_file)
 
-        console.print(f"\nReport saved to: [bold green]{output_file}[/bold green]")
+        console.print(f"\nText report saved to: [bold green]{output_file}[/bold green]")
+        console.print(f"JSON report saved to: [bold green]{json_file}[/bold green]")
+        console.print(f"Bad rows saved to: [bold green]{bad_rows_file}[/bold green]")
 
     except Exception as error:
         console.print(f"[bold red]Error:[/bold red] {error}")

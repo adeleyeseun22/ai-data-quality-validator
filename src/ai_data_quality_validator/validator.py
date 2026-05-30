@@ -30,6 +30,7 @@ class DataQualityReport(BaseModel):
     approved_records: int
     pending_records: int
     rejected_records: int
+    bad_rows: int
     quality_score: float
     recommendation: str
     issues: dict[str, int]
@@ -48,20 +49,13 @@ def load_dataset(file_path: str | Path) -> pd.DataFrame:
 
 
 def validate_required_columns(df: pd.DataFrame, config: ValidationConfig) -> None:
-    missing_columns = [
-        column for column in config.required_columns if column not in df.columns
-    ]
+    missing_columns = [column for column in config.required_columns if column not in df.columns]
 
     if missing_columns:
         raise ValueError(f"Missing required columns: {missing_columns}")
 
 
-def generate_quality_report(
-    df: pd.DataFrame,
-    config: ValidationConfig | None = None,
-) -> DataQualityReport:
-    config = config or ValidationConfig()
-
+def prepare_dataset(df: pd.DataFrame, config: ValidationConfig) -> pd.DataFrame:
     validate_required_columns(df, config)
 
     working_df = df.copy()
@@ -73,26 +67,90 @@ def generate_quality_report(
     working_df["text"] = working_df["text"].fillna("").astype(str).str.strip()
     working_df["confidence"] = pd.to_numeric(working_df["confidence"], errors="coerce")
 
+    return working_df
+
+
+def identify_issue_rows(
+    df: pd.DataFrame,
+    config: ValidationConfig | None = None,
+) -> pd.DataFrame:
+    config = config or ValidationConfig()
+    working_df = prepare_dataset(df, config)
+    issue_df = df.copy()
+
+    duplicate_mask = working_df["task_id"].duplicated(keep=False)
+    missing_text_mask = working_df["text"].eq("")
+    invalid_label_mask = ~working_df["label"].isin(config.valid_labels)
+    low_confidence_mask = working_df["confidence"].isna() | (
+        working_df["confidence"] < config.min_confidence
+    )
+    invalid_status_mask = ~working_df["review_status"].isin(config.valid_review_statuses)
+    pending_mask = working_df["review_status"].eq("pending")
+    rejected_mask = working_df["review_status"].eq("rejected")
+
+    issue_reasons: list[str] = []
+
+    for index in working_df.index:
+        reasons: list[str] = []
+
+        if bool(duplicate_mask.loc[index]):
+            reasons.append("duplicate_task_id")
+
+        if bool(missing_text_mask.loc[index]):
+            reasons.append("missing_text")
+
+        if bool(invalid_label_mask.loc[index]):
+            reasons.append("invalid_label")
+
+        if bool(low_confidence_mask.loc[index]):
+            reasons.append("low_confidence")
+
+        if bool(invalid_status_mask.loc[index]):
+            reasons.append("invalid_review_status")
+
+        if bool(pending_mask.loc[index]):
+            reasons.append("pending_review")
+
+        if bool(rejected_mask.loc[index]):
+            reasons.append("rejected_record")
+
+        issue_reasons.append("; ".join(reasons))
+
+    issue_df["issue_reasons"] = issue_reasons
+    issue_df = issue_df[issue_df["issue_reasons"].str.len() > 0]
+
+    return issue_df
+
+
+def generate_quality_report(
+    df: pd.DataFrame,
+    config: ValidationConfig | None = None,
+) -> DataQualityReport:
+    config = config or ValidationConfig()
+    working_df = prepare_dataset(df, config)
+
     total_records = len(working_df)
 
     duplicate_task_ids = int(working_df["task_id"].duplicated(keep=False).sum())
-
     missing_text_records = int(working_df["text"].eq("").sum())
-
     invalid_labels = int((~working_df["label"].isin(config.valid_labels)).sum())
+
+    low_confidence_records = int(
+        (
+            working_df["confidence"].isna()
+            | (working_df["confidence"] < config.min_confidence)
+        ).sum()
+    )
 
     invalid_review_statuses = int(
         (~working_df["review_status"].isin(config.valid_review_statuses)).sum()
     )
 
-    low_confidence_records = int(
-        working_df["confidence"].isna().sum()
-        + (working_df["confidence"] < config.min_confidence).sum()
-    )
-
     approved_records = int((working_df["review_status"] == "approved").sum())
     pending_records = int((working_df["review_status"] == "pending").sum())
     rejected_records = int((working_df["review_status"] == "rejected").sum())
+
+    bad_rows = int(len(identify_issue_rows(working_df, config)))
 
     issues = {
         "duplicate_task_ids": duplicate_task_ids,
@@ -102,6 +160,7 @@ def generate_quality_report(
         "invalid_review_statuses": invalid_review_statuses,
         "pending_records": pending_records,
         "rejected_records": rejected_records,
+        "bad_rows": bad_rows,
     }
 
     weighted_issue_score = (
@@ -136,6 +195,7 @@ def generate_quality_report(
         approved_records=approved_records,
         pending_records=pending_records,
         rejected_records=rejected_records,
+        bad_rows=bad_rows,
         quality_score=quality_score,
         recommendation=recommendation,
         issues=issues,
