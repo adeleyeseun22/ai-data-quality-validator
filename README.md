@@ -50,11 +50,11 @@ This tool helps teams quickly inspect annotation datasets and identify records t
 
 After running the tool, five files are generated:
 
-reports/quality_report.txt
-reports/quality_report.json
-reports/bad_rows.csv
-reports/issue_summary.csv
-reports/annotator_scores.csv
+- reports/quality_report.txt
+- reports/quality_report.json
+- reports/bad_rows.csv
+- reports/issue_summary.csv
+- reports/annotator_scores.csv
 
 ---
 
