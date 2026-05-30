@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -15,8 +16,12 @@ class ValidationConfig(BaseModel):
             "review_status",
         ]
     )
-    valid_labels: set[str] = Field(default_factory=lambda: {"positive", "negative", "neutral"})
-    valid_review_statuses: set[str] = Field(default_factory=lambda: {"approved", "pending", "rejected"})
+    valid_labels: set[str] = Field(
+        default_factory=lambda: {"positive", "negative", "neutral"}
+    )
+    valid_review_statuses: set[str] = Field(
+        default_factory=lambda: {"approved", "pending", "rejected"}
+    )
     min_confidence: float = Field(default=0.70, ge=0, le=1)
 
 
@@ -49,7 +54,9 @@ def load_dataset(file_path: str | Path) -> pd.DataFrame:
 
 
 def validate_required_columns(df: pd.DataFrame, config: ValidationConfig) -> None:
-    missing_columns = [column for column in config.required_columns if column not in df.columns]
+    missing_columns = [
+        column for column in config.required_columns if column not in df.columns
+    ]
 
     if missing_columns:
         raise ValueError(f"Missing required columns: {missing_columns}")
@@ -60,12 +67,20 @@ def prepare_dataset(df: pd.DataFrame, config: ValidationConfig) -> pd.DataFrame:
 
     working_df = df.copy()
 
-    working_df["label"] = working_df["label"].fillna("").astype(str).str.lower().str.strip()
+    working_df["annotator_id"] = (
+        working_df["annotator_id"].fillna("unknown").astype(str).str.strip()
+    )
+    working_df["label"] = (
+        working_df["label"].fillna("").astype(str).str.lower().str.strip()
+    )
     working_df["review_status"] = (
         working_df["review_status"].fillna("").astype(str).str.lower().str.strip()
     )
     working_df["text"] = working_df["text"].fillna("").astype(str).str.strip()
-    working_df["confidence"] = pd.to_numeric(working_df["confidence"], errors="coerce")
+    working_df["confidence"] = pd.to_numeric(
+        working_df["confidence"],
+        errors="coerce",
+    )
 
     return working_df
 
@@ -84,7 +99,9 @@ def identify_issue_rows(
     low_confidence_mask = working_df["confidence"].isna() | (
         working_df["confidence"] < config.min_confidence
     )
-    invalid_status_mask = ~working_df["review_status"].isin(config.valid_review_statuses)
+    invalid_status_mask = ~working_df["review_status"].isin(
+        config.valid_review_statuses
+    )
     pending_mask = working_df["review_status"].eq("pending")
     rejected_mask = working_df["review_status"].eq("rejected")
 
@@ -120,6 +137,86 @@ def identify_issue_rows(
     issue_df = issue_df[issue_df["issue_reasons"].str.len() > 0]
 
     return issue_df
+
+
+def summarize_issue_types(issue_rows: pd.DataFrame) -> dict[str, int]:
+    issue_counter: Counter[str] = Counter()
+
+    if issue_rows.empty or "issue_reasons" not in issue_rows.columns:
+        return {}
+
+    for issue_text in issue_rows["issue_reasons"].dropna():
+        issues = [issue.strip() for issue in str(issue_text).split(";")]
+        issue_counter.update(issue for issue in issues if issue)
+
+    return dict(sorted(issue_counter.items()))
+
+
+def calculate_annotator_quality(
+    df: pd.DataFrame,
+    config: ValidationConfig | None = None,
+) -> pd.DataFrame:
+    config = config or ValidationConfig()
+    working_df = prepare_dataset(df, config)
+    issue_rows = identify_issue_rows(df, config)
+
+    bad_row_indexes = set(issue_rows.index)
+    working_df["is_bad_row"] = working_df.index.to_series().isin(bad_row_indexes)
+
+    rows: list[dict[str, object]] = []
+
+    for annotator_id, group in working_df.groupby("annotator_id", dropna=False):
+        total_records = int(len(group))
+        bad_rows = int(group["is_bad_row"].sum())
+        approved_records = int((group["review_status"] == "approved").sum())
+        pending_records = int((group["review_status"] == "pending").sum())
+        rejected_records = int((group["review_status"] == "rejected").sum())
+
+        valid_confidence = group["confidence"].dropna()
+        average_confidence = (
+            round(float(valid_confidence.mean()), 3)
+            if not valid_confidence.empty
+            else 0.0
+        )
+
+        quality_score = (
+            round(max(0.0, 100 - ((bad_rows / total_records) * 100)), 2)
+            if total_records > 0
+            else 0.0
+        )
+
+        rows.append(
+            {
+                "annotator_id": annotator_id,
+                "total_records": total_records,
+                "bad_rows": bad_rows,
+                "approved_records": approved_records,
+                "pending_records": pending_records,
+                "rejected_records": rejected_records,
+                "average_confidence": average_confidence,
+                "quality_score": quality_score,
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "annotator_id",
+                "total_records",
+                "bad_rows",
+                "approved_records",
+                "pending_records",
+                "rejected_records",
+                "average_confidence",
+                "quality_score",
+            ]
+        )
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("quality_score", ascending=True)
+        .reset_index(drop=True)
+    )
 
 
 def generate_quality_report(
