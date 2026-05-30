@@ -1,3 +1,5 @@
+![Python CI](https://github.com/adeleyeseun22/ai-data-quality-validator/actions/workflows/ci.yml/badge.svg)
+
 # AI Data Quality Validator
 
 A production-grade Python CLI tool for validating AI annotation datasets, detecting data quality issues, and generating readiness reports for model training and evaluation workflows.
@@ -41,6 +43,19 @@ This tool helps teams quickly inspect annotation datasets and identify records t
 - Pytest
 - Ruff
 - Mypy
+
+---
+
+## Generated Reports
+
+After running the tool, five files are generated:
+
+```text
+reports/quality_report.txt
+reports/quality_report.json
+reports/bad_rows.csv
+reports/issue_summary.csv
+reports/annotator_scores.csv
 
 ---
 
